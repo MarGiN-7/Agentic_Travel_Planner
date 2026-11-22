@@ -1,0 +1,8 @@
+langchain
+langchain-classic
+langchain-google-genai
+langchain-community
+streamlit
+pandas
+requests
+python-dotenv

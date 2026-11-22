@@ -1,0 +1,7 @@
+[
+    {"name": "Sea View Resort", "city": "Goa", "price_per_night": 3200, "rating": 4.5, "amenities": ["Pool", "Beach Access", "Free WiFi"]},
+    {"name": "Mountain Retreat", "city": "Manali", "price_per_night": 2500, "rating": 4.2, "amenities": ["Spa", "Mountain View", "Restaurant"]},
+    {"name": "City Center Hotel", "city": "Mumbai", "price_per_night": 5000, "rating": 4.0, "amenities": ["Gym", "Business Center", "Breakfast"]},
+    {"name": "Heritage Inn", "city": "Goa", "price_per_night": 4500, "rating": 4.7, "amenities": ["Heritage Decor", "Pool", "Garden"]},
+    {"name": "Budget Stay", "city": "Goa", "price_per_night": 1500, "rating": 3.5, "amenities": ["WiFi", "AC"]}
+]

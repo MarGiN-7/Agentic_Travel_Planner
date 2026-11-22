@@ -1,0 +1,7 @@
+[
+    {"airline": "IndiGo", "source": "Delhi", "destination": "Goa", "price": 4800, "departure": "14:00", "duration": "2h 30m"},
+    {"airline": "Air India", "source": "Delhi", "destination": "Goa", "price": 5500, "departure": "10:00", "duration": "2h 45m"},
+    {"airline": "SpiceJet", "source": "Mumbai", "destination": "Goa", "price": 3200, "departure": "08:00", "duration": "1h 15m"},
+    {"airline": "Vistara", "source": "Bangalore", "destination": "Goa", "price": 4200, "departure": "16:00", "duration": "1h 30m"},
+    {"airline": "IndiGo", "source": "Delhi", "destination": "Mumbai", "price": 3500, "departure": "18:00", "duration": "2h 10m"}
+]

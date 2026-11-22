@@ -1,0 +1,7 @@
+[
+    {"name": "Baga Beach", "city": "Goa", "type": "Beach", "rating": 4.5, "description": "Famous beach with water sports and shacks."},
+    {"name": "Basilica of Bom Jesus", "city": "Goa", "type": "Heritage", "rating": 4.8, "description": "UNESCO World Heritage site with baroque architecture."},
+    {"name": "Dudhsagar Falls", "city": "Goa", "type": "Nature", "rating": 4.6, "description": "Four-tiered waterfall on the Mandovi River."},
+    {"name": "Gateway of India", "city": "Mumbai", "type": "Heritage", "rating": 4.7, "description": "Iconic arch-monument overlooking the Arabian Sea."},
+    {"name": "Hadimba Devi Temple", "city": "Manali", "type": "Temple", "rating": 4.5, "description": "Ancient cave temple dedicated to Hidimbi Devi."}
+]
