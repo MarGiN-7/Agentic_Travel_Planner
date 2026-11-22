@@ -1,4 +1,4 @@
-# Agentic AI-Based Travel Planning Assistant
+# Agentic AI-Based Travel Planning Assistant💫
 
 An intelligent travel planning system built using LangChain, OpenAI, and Streamlit. This assistant autonomously creates optimized trip itineraries by searching for flights, hotels, attractions, and real-time weather data.
 
