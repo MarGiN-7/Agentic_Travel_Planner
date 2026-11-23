@@ -2,6 +2,7 @@
 import os
 import sys
 from datetime import date, timedelta
+from decimal import Decimal
 from html import escape
 
 import streamlit as st
@@ -23,6 +24,8 @@ load_dotenv()
 
 from agents.travel_agent import create_travel_agent
 from models.trip_request import TripRequest
+from services.itinerary_parser import parse_itinerary
+from services.budget_service import BudgetAssessment
 
 st.set_page_config(
     page_title="WanderAI | Smart Travel Planner",
@@ -203,6 +206,15 @@ if "itinerary" not in st.session_state:
 if "trip_info" not in st.session_state:
     st.session_state.trip_info = {}
 
+if "budget_data" not in st.session_state:
+    st.session_state.budget_data = None
+
+if "price_source" not in st.session_state:
+    st.session_state.price_source = "unknown"
+
+if "price_assumptions" not in st.session_state:
+    st.session_state.price_assumptions = []
+
 
 # -----------------------------
 # Sidebar
@@ -355,18 +367,30 @@ if submit_button:
             # Avoid showing a stale result if the new request fails.
             st.session_state.itinerary = ""
             st.session_state.trip_info = {}
+            st.session_state.budget_data = None
+            st.session_state.price_source = "unknown"
+            st.session_state.price_assumptions = []
 
             with st.spinner(
                 f"🌍 Planning your {trip.num_days}-day adventure to {trip.destination}..."
             ):
                 try:
                     agent = create_travel_agent()
-                    user_input = (
-                        trip.to_agent_prompt()
-                        + "\nFormat the final answer in readable Markdown."
-                    )
-                    response = agent.invoke({"input": user_input})
-                    itinerary_text = extract_text(response.get("output", ""))
+                    response = agent.invoke({"input": trip.to_agent_prompt()})
+                    raw_output = response.get("output", "")
+                    try:
+                        plan = parse_itinerary(raw_output)
+                    except ValueError:
+                        # Keep a readable fallback if Gemini fails to return valid JSON.
+                        # Do not attempt to infer costs from arbitrary text.
+                        st.warning(
+                            "Gemini returned an unstructured response. "
+                            "The itinerary is shown below, but budget analysis is unavailable."
+                        )
+                        itinerary_text = extract_text(raw_output)
+                        plan = None
+                    else:
+                        itinerary_text = plan.itinerary_markdown
 
                     if itinerary_text.strip():
                         st.session_state.itinerary = itinerary_text
@@ -380,6 +404,14 @@ if submit_button:
                             "travel_style": trip.travel_style,
                             "interests": trip.interests,
                         }
+                        if plan is not None:
+                            st.session_state.price_source = plan.price_source
+                            st.session_state.price_assumptions = plan.assumptions
+                            if plan.expenses is not None:
+                                st.session_state.budget_data = BudgetAssessment(
+                                    budget=Decimal(str(trip.budget)),
+                                    expenses=plan.expenses,
+                                ).model_dump(mode="json")
                         st.success("Your personalized trip plan is ready!")
                     else:
                         st.warning("The AI returned no itinerary text. Please try again.")
@@ -417,6 +449,75 @@ if st.session_state.itinerary:
 
     with st.container(border=True):
         st.markdown(st.session_state.itinerary)
+
+    st.markdown("## 💰 Trip Budget Analysis")
+    budget_data = st.session_state.budget_data
+    if budget_data is None:
+        st.info("Budget analysis unavailable: a complete expense breakdown was not provided.")
+    else:
+        # Revalidate persisted data; all arithmetic comes from BudgetAssessment.
+        assessment = BudgetAssessment.model_validate(budget_data)
+        cost = assessment.total_cost
+        remaining = assessment.remaining
+        utilization = float(assessment.utilization_percent)
+
+        metric1, metric2, metric3 = st.columns(3)
+        metric1.metric("Your budget", f"₹{assessment.budget:,.0f}")
+        metric2.metric("Estimated trip cost", f"₹{cost:,.0f}")
+        metric3.metric(
+            "Remaining budget" if remaining >= 0 else "Over budget by",
+            f"₹{abs(remaining):,.0f}",
+        )
+        st.progress(min(max(utilization / 100, 0.0), 1.0))
+        st.caption(f"Estimated budget utilization: {utilization:.1f}%")
+
+        if not assessment.within_budget:
+            st.error(
+                f"Estimated costs exceed your budget by ₹{-remaining:,.0f}. "
+                "Consider cheaper flights, accommodation, or activities."
+            )
+        elif utilization >= 90:
+            st.warning(
+                "This plan uses almost all of your budget. "
+                "Allow extra room for unexpected costs."
+            )
+        else:
+            st.success("Estimated expenses fit within your stated budget.")
+
+        categories = {
+            "Flights": assessment.expenses.flights,
+            "Accommodation": assessment.expenses.accommodation,
+            "Food": assessment.expenses.food,
+            "Local transport": assessment.expenses.local_transport,
+            "Activities": assessment.expenses.activities,
+            "Other": assessment.expenses.other,
+        }
+        st.markdown("### Expense breakdown")
+        st.bar_chart({name: float(value) for name, value in categories.items()})
+        with st.expander("See itemized estimated expenses"):
+            for name, amount in categories.items():
+                st.write(f"{name}: ₹{amount:,.0f}")
+
+        if assessment.expenses.activities == 0:
+            st.warning(
+                "Activities are listed as ₹0. Check whether sightseeing, "
+                "entry fees, or tours have been omitted from the estimate."
+            )
+
+    source_labels = {
+        "ai_estimate": "AI-generated estimate",
+        "local_dataset": "Local dataset / sample prices",
+        "live_api": "Live API (as reported by the agent; not independently verified)",
+        "unknown": "Unknown or mixed sources",
+    }
+    st.caption(
+        "Price source: " + source_labels.get(st.session_state.price_source, "Unknown")
+        + ". Prices and availability must be confirmed before booking."
+    )
+    if st.session_state.price_assumptions:
+        with st.expander("Pricing assumptions"):
+            for assumption in st.session_state.price_assumptions:
+                st.write("• " + str(assumption))
 
     st.download_button(
         label="📥 Download Itinerary",
