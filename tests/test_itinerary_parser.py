@@ -77,3 +77,41 @@ def test_rejects_invalid_json():
 def test_rejects_empty_response():
     with pytest.raises(ValueError):
         parse_itinerary("")
+
+
+def test_parses_expense_completeness():
+    import json
+
+    response = {
+        "itinerary_markdown": "# Goa Trip",
+        "expenses": None,
+        "price_source": "ai_estimate",
+        "assumptions": [],
+        "completeness": {
+            "missing_categories": ["activities"],
+            "notes": ["Activity prices are unavailable."],
+        },
+    }
+
+    result = parse_itinerary(json.dumps(response))
+
+    assert result.expenses is None
+    assert result.completeness is not None
+    assert result.completeness.is_complete is False
+    assert result.completeness.missing_categories == ["activities"]
+
+
+def test_legacy_response_without_completeness():
+    import json
+
+    response = {
+        "itinerary_markdown": "# Goa Trip",
+        "expenses": None,
+        "price_source": "unknown",
+        "assumptions": [],
+    }
+
+    result = parse_itinerary(json.dumps(response))
+
+    assert result.completeness is None
+

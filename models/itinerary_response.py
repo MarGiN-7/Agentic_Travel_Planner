@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from models.expense_completeness import ExpenseCompleteness
 from services.budget_service import TripExpenses
 
 
@@ -18,6 +19,6 @@ class ItineraryResponse(BaseModel):
         "unknown",
     ] = "unknown"
 
-    assumptions: list[str] = Field(
-        default_factory=list
-    )
+    assumptions: list[str] = Field(default_factory=list)
+
+    completeness: ExpenseCompleteness | None = None

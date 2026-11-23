@@ -5,7 +5,7 @@ import sys
 # Add the local lib folder to sys.path
 lib_path = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "lib"
+    "lib",
 )
 
 if os.path.exists(lib_path):
@@ -22,6 +22,7 @@ from langchain_core.prompts import (
     MessagesPlaceholder,
 )
 
+# Import travel tools
 from tools.flight_tool import flight_search
 from tools.hotel_tool import hotel_recommendation
 from tools.place_tool import place_discovery
@@ -69,7 +70,6 @@ Follow these rules:
 IMPORTANT: Your FINAL response must be one valid JSON
 object with exactly these top-level fields:
 
-
 {{
   "itinerary_markdown": "Full readable Markdown itinerary",
   "expenses": {{
@@ -81,8 +81,31 @@ object with exactly these top-level fields:
     "other": 0
   }},
   "price_source": "unknown",
-  "assumptions": []
+  "assumptions": [],
+  "completeness": {{
+    "missing_categories": [],
+    "notes": []
+  }}
 }}
+
+Expense completeness rules:
+- Report costs excluded from the estimate in
+  "completeness.missing_categories".
+- Allowed categories: flights, accommodation, food,
+  local_transport, activities, other.
+- If a category has unknown costs, do not use zero
+  as a placeholder.
+- If the estimate cannot represent a complete breakdown,
+  set "expenses" to null.
+- If expenses is null because costs are missing,
+  list the missing categories whenever identifiable.
+- Explain exclusions in "completeness.notes".
+- An empty missing_categories list means no omissions
+  were identified, not that prices were independently verified.
+- If you cannot assess completeness, set
+  "completeness" to null.
+- Never claim a trip is fully within budget when
+  required expenses are missing.
 
 Expense rules:
 - All expense amounts must be totals in INR for the
@@ -90,6 +113,7 @@ Expense rules:
 - Use non-negative numeric values.
 - Do not add a total field. Python will calculate it.
 - Never use zero for an unknown expense.
+- Use zero only when a category genuinely has no cost.
 - If a complete breakdown is unavailable, use
   "expenses": null.
 - Use "local_dataset" for local sample data.

@@ -26,6 +26,7 @@ from agents.travel_agent import create_travel_agent
 from models.trip_request import TripRequest
 from services.itinerary_parser import parse_itinerary
 from services.budget_service import BudgetAssessment
+from models.expense_completeness import ExpenseCompleteness
 
 st.set_page_config(
     page_title="WanderAI | Smart Travel Planner",
@@ -215,6 +216,9 @@ if "price_source" not in st.session_state:
 if "price_assumptions" not in st.session_state:
     st.session_state.price_assumptions = []
 
+if "completeness_data" not in st.session_state:
+    st.session_state.completeness_data = None
+
 
 # -----------------------------
 # Sidebar
@@ -370,6 +374,7 @@ if submit_button:
             st.session_state.budget_data = None
             st.session_state.price_source = "unknown"
             st.session_state.price_assumptions = []
+            st.session_state.completeness_data = None
 
             with st.spinner(
                 f"🌍 Planning your {trip.num_days}-day adventure to {trip.destination}..."
@@ -407,6 +412,10 @@ if submit_button:
                         if plan is not None:
                             st.session_state.price_source = plan.price_source
                             st.session_state.price_assumptions = plan.assumptions
+                            st.session_state.completeness_data = (
+                                plan.completeness.model_dump(mode="json")
+                                if plan.completeness is not None else None
+                            )
                             if plan.expenses is not None:
                                 st.session_state.budget_data = BudgetAssessment(
                                     budget=Decimal(str(trip.budget)),
@@ -452,37 +461,84 @@ if st.session_state.itinerary:
 
     st.markdown("## 💰 Trip Budget Analysis")
     budget_data = st.session_state.budget_data
-    if budget_data is None:
-        st.info("Budget analysis unavailable: a complete expense breakdown was not provided.")
+    completeness_data = st.session_state.completeness_data
+    completeness = (
+        ExpenseCompleteness.model_validate(completeness_data)
+        if completeness_data is not None else None
+    )
+
+    if completeness is None:
+        st.warning(
+            "Budget completeness unknown. The agent did not assess whether "
+            "all required costs were included."
+        )
+    elif not completeness.is_complete:
+        st.warning(completeness.warning_message())
+        for note in completeness.notes:
+            st.caption(str(note))
     else:
-        # Revalidate persisted data; all arithmetic comes from BudgetAssessment.
+        st.info(
+            "No missing expense categories were reported by the agent. "
+            "This does not verify the estimates or guarantee all costs are covered."
+        )
+        for note in completeness.notes:
+            st.caption(str(note))
+
+    if budget_data is None:
+        st.info(
+            "Budget totals and utilization are unavailable because the agent "
+            "did not provide a complete numeric expense breakdown. "
+            "Unknown expenses are not treated as ₹0."
+        )
+    else:
+        # BudgetAssessment computes totals from reported numeric categories.
+        # Completeness is evaluated separately; totals are not independently verified.
         assessment = BudgetAssessment.model_validate(budget_data)
         cost = assessment.total_cost
         remaining = assessment.remaining
         utilization = float(assessment.utilization_percent)
+        is_reported_complete = (
+            completeness is not None and completeness.is_complete
+        )
 
         metric1, metric2, metric3 = st.columns(3)
         metric1.metric("Your budget", f"₹{assessment.budget:,.0f}")
-        metric2.metric("Estimated trip cost", f"₹{cost:,.0f}")
+        metric2.metric(
+            "Reported estimated cost" if is_reported_complete
+            else "Reported cost subtotal",
+            f"₹{cost:,.0f}",
+        )
         metric3.metric(
-            "Remaining budget" if remaining >= 0 else "Over budget by",
-            f"₹{abs(remaining):,.0f}",
+            "Estimated balance" if is_reported_complete
+            else "Budget minus reported costs",
+            f"₹{remaining:,.0f}",
         )
         st.progress(min(max(utilization / 100, 0.0), 1.0))
-        st.caption(f"Estimated budget utilization: {utilization:.1f}%")
+        st.caption(
+            f"Reported cost utilization: {utilization:.1f}%. "
+            "Actual costs may be higher."
+        )
 
-        if not assessment.within_budget:
+        if remaining < 0:
             st.error(
-                f"Estimated costs exceed your budget by ₹{-remaining:,.0f}. "
-                "Consider cheaper flights, accommodation, or activities."
+                f"Reported costs already exceed your budget by ₹{-remaining:,.0f}. "
+                "Additional unreported costs may increase the shortfall."
+            )
+        elif not is_reported_complete:
+            st.warning(
+                "Cannot determine whether the trip fits your budget: "
+                "expense coverage is incomplete or unknown."
             )
         elif utilization >= 90:
             st.warning(
-                "This plan uses almost all of your budget. "
+                "The reported estimate uses almost all your budget. "
                 "Allow extra room for unexpected costs."
             )
         else:
-            st.success("Estimated expenses fit within your stated budget.")
+            st.success(
+                "Reported estimated expenses fit within your budget, "
+                "subject to unverified prices and possible omissions."
+            )
 
         categories = {
             "Flights": assessment.expenses.flights,
@@ -492,9 +548,9 @@ if st.session_state.itinerary:
             "Activities": assessment.expenses.activities,
             "Other": assessment.expenses.other,
         }
-        st.markdown("### Expense breakdown")
+        st.markdown("### Reported expense breakdown")
         st.bar_chart({name: float(value) for name, value in categories.items()})
-        with st.expander("See itemized estimated expenses"):
+        with st.expander("See itemized reported expenses"):
             for name, amount in categories.items():
                 st.write(f"{name}: ₹{amount:,.0f}")
 
@@ -504,15 +560,19 @@ if st.session_state.itinerary:
                 "entry fees, or tours have been omitted from the estimate."
             )
 
+    # Price provenance cannot be verified from the model's self-reported label.
+    # Even a 'live_api' label is not evidence of a real-time price lookup.
     source_labels = {
-        "ai_estimate": "AI-generated estimate",
-        "local_dataset": "Local dataset / sample prices",
-        "live_api": "Live API (as reported by the agent; not independently verified)",
+        "ai_estimate": "AI-generated estimate (agent-reported)",
+        "local_dataset": "Local dataset / sample prices (agent-reported)",
+        "live_api": "Live API claimed by agent — NOT independently verified",
         "unknown": "Unknown or mixed sources",
     }
     st.caption(
-        "Price source: " + source_labels.get(st.session_state.price_source, "Unknown")
-        + ". Prices and availability must be confirmed before booking."
+        "Unverified price source: "
+        + source_labels.get(st.session_state.price_source, "Unknown")
+        + ". WanderAI has not independently verified live fares, prices, "
+        "or availability. Confirm with providers before booking."
     )
     if st.session_state.price_assumptions:
         with st.expander("Pricing assumptions"):
