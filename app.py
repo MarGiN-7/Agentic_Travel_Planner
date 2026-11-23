@@ -1,8 +1,12 @@
 
 import os
 import sys
+from datetime import date, timedelta
+from html import escape
+
 import streamlit as st
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 # -----------------------------
 # Project setup
@@ -18,6 +22,7 @@ sys.path.append(BASE_DIR)
 load_dotenv()
 
 from agents.travel_agent import create_travel_agent
+from models.trip_request import TripRequest
 
 st.set_page_config(
     page_title="WanderAI | Smart Travel Planner",
@@ -277,34 +282,50 @@ with st.form("travel_form"):
     col1, col2 = st.columns(2, gap="large")
 
     with col1:
-        source = st.text_input(
-            "📍 Departure City",
-            placeholder="e.g. Delhi"
-        )
-
+        source = st.text_input("📍 Departure City", placeholder="e.g. Delhi")
     with col2:
-        destination = st.text_input(
-            "🏝️ Destination City",
-            placeholder="e.g. Goa"
+        destination = st.text_input("🏝️ Destination City", placeholder="e.g. Goa")
+
+    col3, col4 = st.columns(2, gap="large")
+    with col3:
+        departure_date = st.date_input(
+            "📅 Departure Date",
+            value=date.today() + timedelta(days=7),
+            min_value=date.today(),
+        )
+    with col4:
+        travelers = st.number_input(
+            "👥 Number of Travelers", min_value=1, max_value=20, value=2, step=1
         )
 
-    st.write("")
+    num_days = st.slider("🗓️ Trip Duration (Days)", 1, 14, 4)
 
-    num_days = st.slider(
-        "🗓️ Trip Duration (Days)",
-        min_value=1,
-        max_value=7,
-        value=3
+    col5, col6 = st.columns(2, gap="large")
+    with col5:
+        budget = st.number_input(
+            "💰 Total Trip Budget (INR)",
+            min_value=1,
+            value=25000,
+            step=1000,
+            help="Total budget for all travelers, not per person.",
+        )
+    with col6:
+        travel_style = st.selectbox(
+            "✨ Travel Style", ["budget", "balanced", "luxury"], index=1,
+            format_func=str.title,
+        )
+
+    interests = st.multiselect(
+        "🎯 Your Interests",
+        ["Beaches", "Nature", "Adventure", "Food", "Culture",
+         "Shopping", "History", "Nightlife", "Relaxation", "Wildlife"],
+        default=["Nature", "Food"],
+        max_selections=10,
     )
 
-    st.caption(
-        f"Your personalized itinerary will cover {num_days} day(s)."
-    )
-
+    st.caption("Prices are estimates. Confirm live prices and availability before booking.")
     submit_button = st.form_submit_button(
-        "✨ Generate My Trip",
-        use_container_width=True,
-        type="primary"
+        "✨ Generate My Trip", use_container_width=True, type="primary"
     )
 
 
@@ -312,63 +333,61 @@ with st.form("travel_form"):
 # Generate trip
 # -----------------------------
 if submit_button:
-    source = source.strip()
-    destination = destination.strip()
-
-    if not os.getenv("GOOGLE_API_KEY"):
-        st.error(
-            "Please configure your Gemini API key in the sidebar "
-            "or .env file."
+    try:
+        trip = TripRequest(
+            source=source,
+            destination=destination,
+            departure_date=departure_date,
+            num_days=num_days,
+            travelers=travelers,
+            budget=budget,
+            travel_style=travel_style,
+            interests=interests,
         )
-
-    elif not source or not destination:
-        st.error(
-            "Please enter both departure and destination cities."
-        )
-
+    except ValidationError as exc:
+        for error in exc.errors():
+            field = ".".join(str(part) for part in error["loc"]) or "Trip"
+            st.error(f"{field}: {error['msg']}")
     else:
-        # Clear previous results before generating a new trip
-        st.session_state.itinerary = ""
-        st.session_state.trip_info = {}
+        if not os.getenv("GOOGLE_API_KEY"):
+            st.error("Please configure your Gemini API key in the sidebar or .env file.")
+        else:
+            # Avoid showing a stale result if the new request fails.
+            st.session_state.itinerary = ""
+            st.session_state.trip_info = {}
 
-        with st.spinner(
-            f"🌍 Planning your {num_days}-day adventure to {destination}..."
-        ):
-            try:
-                agent = create_travel_agent()
-
-                user_input = (
-                    f"Plan a {num_days}-day trip from "
-                    f"{source} to {destination}. "
-                    "Include flight options, hotel recommendations, "
-                    "weather, tourist attractions, a day-wise "
-                    "itinerary, and an estimated budget. "
-                    "Format the final answer in readable Markdown."
-                )
-
-                response = agent.invoke({
-                    "input": user_input
-                })
-
-                itinerary_text = extract_text(
-                    response.get("output", "")
-                )
-
-                if itinerary_text.strip():
-                    st.session_state.itinerary = itinerary_text
-                    st.session_state.trip_info = {
-                        "source": source,
-                        "destination": destination,
-                        "days": num_days
-                    }
-                else:
-                    st.warning(
-                        "The AI returned no itinerary text. "
-                        "Please try again."
+            with st.spinner(
+                f"🌍 Planning your {trip.num_days}-day adventure to {trip.destination}..."
+            ):
+                try:
+                    agent = create_travel_agent()
+                    user_input = (
+                        trip.to_agent_prompt()
+                        + "\nFormat the final answer in readable Markdown."
                     )
+                    response = agent.invoke({"input": user_input})
+                    itinerary_text = extract_text(response.get("output", ""))
 
-            except Exception as e:
-                st.error(f"Trip generation failed: {e}")
+                    if itinerary_text.strip():
+                        st.session_state.itinerary = itinerary_text
+                        st.session_state.trip_info = {
+                            "source": trip.source,
+                            "destination": trip.destination,
+                            "days": trip.num_days,
+                            "departure_date": trip.departure_date.isoformat(),
+                            "travelers": trip.travelers,
+                            "budget": trip.budget,
+                            "travel_style": trip.travel_style,
+                            "interests": trip.interests,
+                        }
+                        st.success("Your personalized trip plan is ready!")
+                    else:
+                        st.warning("The AI returned no itinerary text. Please try again.")
+                except Exception:
+                    st.error(
+                        "Trip generation failed. Check your API key, connection, "
+                        "and Gemini quota, then try again."
+                    )
 
 
 # -----------------------------
@@ -384,8 +403,10 @@ if st.session_state.itinerary:
         <div class="result-header">
             <h3>🎉 Your Adventure Is Ready!</h3>
             <div>
-                {info['source']} → {info['destination']}
+                {escape(info['source'])} → {escape(info['destination'])}
                 &nbsp; | &nbsp; {info['days']} Days
+                &nbsp; | &nbsp; {escape(info['departure_date'])}
+                &nbsp; | &nbsp; {info['travelers']} Traveler(s)
             </div>
         </div>
         """,
